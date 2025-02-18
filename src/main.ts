@@ -1,19 +1,10 @@
 import { NestFactory } from '@nestjs/core';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { AppModule } from './app.module';
+import { AppModule } from './modules/app/app.module';
+import { setupSwagger } from './swagger/config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
-  const config = new DocumentBuilder()
-    .setTitle('FlowlyMeet')
-    .setDescription('The FlowlyMeet API description')
-    .setVersion('1.0')
-    .addTag('flowlymeet')
-    .build();
-  const documentFactory = () => SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, documentFactory);
-
+  setupSwagger(app);
   await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();
