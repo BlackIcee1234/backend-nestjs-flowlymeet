@@ -27,6 +27,7 @@ import {
   validateRoomPayload,
   createVideoStatePayload
 } from './utils/room.utils';
+import { createRoomId } from '../../utils/room.utils';
 
 /**
  * Gateway for handling real-time room communication and WebRTC signaling
@@ -80,6 +81,44 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`Client disconnected: ${client.id}`);
     this.roomService.handleUserLeaveRooms(client, this.server);
     client.removeAllListeners();
+  }
+
+  /**
+ * Handles room creation requests
+ * @param client Socket client instance
+ * @param payload Room creation payload
+ */
+  @UseGuards(RoomValidationGuard)
+  @SubscribeMessage(ROOM_EVENTS.CREATE)
+  async handleCreateRoom(client: Socket, payload: { name: string; maxParticipants?: number, userId: string }) {
+    // Check if user is authenticated
+    const userId = payload.userId;
+    if (!userId) {
+      this.logger.warn('Unauthorized room creation attempt', { clientId: client.id });
+      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.UNAUTHORIZED });
+      return;
+    }
+
+    try {
+      const roomCode = createRoomId();
+      const room = await this.roomService.createRoom(
+        roomCode,
+        userId,
+        payload.name,
+        payload.maxParticipants
+      );
+
+      this.logger.logRoomEvent(roomCode, 'create', client.id);
+      console.log('Room created:', roomCode);
+      this.logger.logRoomEvent(roomCode, 'join', client.id);
+      console.log('Joining room:', roomCode);
+      this.roomService.joinRoom(client, roomCode, this.server);
+      return createEventResponse(ROOM_MESSAGES.JOINED, { room: roomCode });
+    } catch (error) {
+      this.logger.error('Failed to create room: ' + error.message);
+      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_CREATION_FAILED });
+      return;
+    }
   }
 
   /**

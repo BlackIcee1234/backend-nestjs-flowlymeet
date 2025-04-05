@@ -6,28 +6,48 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
-  id            String    @id @default(uuid())
-  name          String
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email         String    @unique
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  rooms         Room[]    @relation("RoomParticipants")
-  ownedRooms    Room[]    @relation("RoomOwner")
+  username      String    @unique
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+  createdRooms  Room[]    @relation("RoomCreator")
+  participantIn RoomParticipant[]
+
+  @@map("users")
 }
 
 model Room {
-  id            String    @id
-  name          String
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  isActive      Boolean   @default(true)
-  owner         User      @relation("RoomOwner", fields: [ownerId], references: [id])
-  ownerId       String
-  participants  User[]    @relation("RoomParticipants")
-  maxParticipants Int     @default(10)
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code            String    @unique
+  name            String
+  createdBy       String?   @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+  isActive        Boolean   @default(true) @map("is_active")
+  maxParticipants Int       @default(10) @map("max_participants")
+  creator         User?     @relation("RoomCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+  participants    RoomParticipant[]
+
+  @@map("rooms")
+}
+
+model RoomParticipant {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId    String    @map("room_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  joinedAt  DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+  leftAt    DateTime? @map("left_at") @db.Timestamptz
+  isActive  Boolean   @default(true) @map("is_active")
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@map("room_participants")
 }

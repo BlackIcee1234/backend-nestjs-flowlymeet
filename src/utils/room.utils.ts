@@ -22,6 +22,19 @@ export const isValidRoomId = (roomId: string): boolean => {
     return ROOM_ID_PATTERN.test(roomId);
 };
 
+export const createRoomId = (): string => {
+    const generateRandomLetters = (length: number): string => {
+        const letters = 'abcdefghijklmnopqrstuvwxyz';
+        let result = '';
+        for (let i = 0; i < length; i++) {
+            result += letters.charAt(Math.floor(Math.random() * letters.length));
+        }
+        return result;
+    };
+
+    return `${generateRandomLetters(3)}-${generateRandomLetters(3)}`;
+};
+
 /**
  * Checks if a room exists in the database
  */
@@ -98,15 +111,16 @@ export const validateRoomAccess = async (
     roomRepository: RoomRepository
 ): Promise<{ isValid: boolean; error?: string }> => {
     // First check if the room ID format is valid
-    // if (!isValidRoomId(roomId)) {
-    //     return { isValid: false, error: RoomErrors.INVALID_ROOM_ID_FORMAT };
-    // }
+    if (!isValidRoomId(roomId)) {
+        return { isValid: false, error: RoomErrors.INVALID_ROOM_ID_FORMAT };
+    }
 
-    // // Check if room exists
-    // const roomExists = await doesRoomExist(roomId, roomRepository);
-    // if (!roomExists) {
-    //     return { isValid: false, error: RoomErrors.ROOM_DOES_NOT_EXIST };
-    // }
+    // Check if room exists
+    const roomExists = await doesRoomExist(roomId, roomRepository);
+    console.log('roomExists', roomExists);
+    if (!roomExists) {
+        return { isValid: false, error: RoomErrors.ROOM_DOES_NOT_EXIST };
+    }
 
     // // Check if room is active
     // const isActive = await isRoomActive(roomId, roomRepository);

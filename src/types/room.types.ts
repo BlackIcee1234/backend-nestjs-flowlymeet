@@ -11,7 +11,7 @@ export interface Room {
     createdAt: Date;
     updatedAt: Date;
     isActive: boolean;
-    ownerId: string;
+    createdBy?: string;
     maxParticipants: number;
     participants: string[];
 }

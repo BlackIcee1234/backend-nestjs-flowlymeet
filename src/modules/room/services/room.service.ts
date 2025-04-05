@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomParticipant, Room } from '../../../types/room.types';
 import { RoomRepository } from '../room.repository';
-import { validateRoomAccess } from '../../../utils/room.utils';
+import { validateRoomAccess, createRoomId } from '../../../utils/room.utils';
 import { createEventResponse } from '../utils/room.utils';
 import { ROOM_EVENTS, ROOM_MESSAGES } from '../constants/room.constants';
 
@@ -46,7 +46,17 @@ export class RoomService {
       throw new Error('Failed to create room');
     }
 
-    return room;
+    // Convert Prisma room to our Room type
+    return {
+      id: room.id,
+      name: room.name,
+      createdBy: room.createdBy || '',
+      maxParticipants: room.maxParticipants,
+      isActive: room.isActive,
+      participants: room.participants.map(p => p.userId),
+      createdAt: room.createdAt,
+      updatedAt: room.updatedAt
+    };
   }
 
   /**

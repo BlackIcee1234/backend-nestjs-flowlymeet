@@ -2,6 +2,7 @@
  * Room-related event names
  */
 export const ROOM_EVENTS = {
+  CREATE: 'create-room',
   JOIN: 'join-room',
   LEAVE: 'leave-room',
   BROADCAST: 'broadcast-message',
@@ -24,13 +25,16 @@ export const ROOM_ERRORS = {
   ROOM_REQUIRED: 'Room id is required',
   NOT_IN_ROOM: 'You must be in the room to perform this action',
   SDP_OFFER_REQUIRED: 'SDP offer is required to start video',
-  INVALID_PAYLOAD: 'Invalid payload provided'
+  INVALID_PAYLOAD: 'Invalid payload provided',
+  UNAUTHORIZED: 'You must be authenticated to create a room',
+  ROOM_CREATION_FAILED: 'Failed to create room'
 } as const;
 
 /**
  * Room-related success messages
  */
 export const ROOM_MESSAGES = {
+  CREATED: 'Room created successfully',
   JOINED: 'Joined room successfully',
   LEFT: 'Left room successfully',
   MESSAGE_SENT: 'Message sent successfully',
