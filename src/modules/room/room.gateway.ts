@@ -8,36 +8,48 @@ import {
 import { UseGuards } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { RoomService } from './services/room.service';
-import { RoomRoutes } from './routes/room.routes';
-import { MediaRoutes } from './routes/media.routes';
 import { SignalRoutes } from './routes/signal.routes';
-import { RoomValidationGuard } from '../room/guards/room-validation.guard';
+import { RoomValidationGuard } from './guards/room-validation.guard';
+import { LoggerService } from '../../common/logger/logger.service';
+import { 
+  ROOM_EVENTS, 
+  ROOM_ERRORS, 
+  ROOM_MESSAGES, 
+  WS_CONFIG 
+} from './constants/room.constants';
+import {
+  RoomEventPayload,
+  VideoEventPayload,
+  BroadcastMessagePayload,
+  isUserInRoom,
+  getOtherUsersInRoom,
+  createEventResponse,
+  validateRoomPayload,
+  createVideoStatePayload
+} from './utils/room.utils';
 
-@WSGateway({
-  cors: {
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST']
-  },
-  namespace: '/',
-  transports: ['websocket', 'polling'],
-  path: '/socket.io',
-  allowEIO3: true,
-  pingInterval: 10000,
-  pingTimeout: 5000
-})
+/**
+ * Gateway for handling real-time room communication and WebRTC signaling
+ */
+@WSGateway(WS_CONFIG)
 export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
   constructor(
     private readonly roomService: RoomService,
-    private readonly roomRoutes: RoomRoutes,
-    private readonly mediaRoutes: MediaRoutes,
-    private readonly signalRoutes: SignalRoutes
-  ) {}
+    private readonly signalRoutes: SignalRoutes,
+    private readonly logger: LoggerService
+  ) {
+    this.logger.setContext('RoomGateway');
+  }
 
+  /**
+   * Handles new WebSocket connections
+   * @param client Socket client instance
+   */
   async handleConnection(client: Socket) {
-    // Log connection details
+    this.logger.logWebSocketEvent(client, 'connection');
+    
     const clientInfo = {
       id: client.id,
       handshake: {
@@ -53,287 +65,216 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     
     console.log('New client connected:', clientInfo);
     
-    // Initialize routes after successful connection
-    // client.on('join-room', (data) => this.roomRoutes.handleJoinRoom(client, this.server, data));
-    // client.on('leave-room', (data) => this.roomRoutes.handleLeaveRoom(client, this.server, data));
-    // client.on('media-state-change', (data) => this.mediaRoutes.handleMediaStateChange(client, this.server, data));
-    // client.on('start-screen-share', (data) => this.mediaRoutes.handleStartScreenShare(client, this.server, data));
-    // client.on('stop-screen-share', (data) => this.mediaRoutes.handleStopScreenShare(client, this.server, data));
-    // client.on('signal', (data) => this.signalRoutes.handleSignal(client, this.server, data));
-    // client.on('broadcast-message', (data) => this.signalRoutes.handleBroadcastMessage(client, this.server, data));
-    
-    // Emit connection status to client
-    return client.emit('connection-status', { 
+    return client.emit(ROOM_EVENTS.CONNECTION_STATUS, createEventResponse('Connected', { 
       connected: true,
-      clientId: client.id,
-      timestamp: new Date().toISOString()
-    });
+      clientId: client.id
+    }));
   }
 
+  /**
+   * Handles client disconnections
+   * @param client Socket client instance
+   */
   handleDisconnect(client: Socket) {
+    this.logger.logWebSocketEvent(client, 'disconnection');
     console.log(`Client disconnected: ${client.id}`);
-    
-    // Handle user leaving rooms
     this.roomService.handleUserLeaveRooms(client, this.server);
-    
-    // Clean up any remaining listeners
     client.removeAllListeners();
   }
 
+  /**
+   * Handles room join requests
+   * @param client Socket client instance
+   * @param payload Room join payload
+   */
   @UseGuards(RoomValidationGuard)
-  @SubscribeMessage('join-room')
-  handleJoinRoom(client: Socket, payload: any) {
-    if (!payload || !payload.room) {
-      client.emit('error', { message: 'Room id is required' });
+  @SubscribeMessage(ROOM_EVENTS.JOIN)
+  handleJoinRoom(client: Socket, payload: RoomEventPayload) {
+    if (!validateRoomPayload(payload)) {
+      this.logger.warn('Invalid join room payload', { payload });
+      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_REQUIRED });
       return;
     }
 
     const { room } = payload;
+    this.logger.logRoomEvent(room, 'join', client.id);
     console.log('Joining room:', room);
     this.roomService.joinRoom(client, room, this.server);
-    return {
-      message: 'Joined room',
-      room
-    };
+    return createEventResponse(ROOM_MESSAGES.JOINED, { room });
   }
 
+  /**
+   * Handles room leave requests
+   * @param client Socket client instance
+   * @param payload Room leave payload
+   */
   @UseGuards(RoomValidationGuard)
-  @SubscribeMessage('leave-room')
-  handleLeaveRoom(client: Socket, server: Server, payload: any) {
-    if (!payload || !payload.room) {
-      client.emit('error', { message: 'Room id is required' });
+  @SubscribeMessage(ROOM_EVENTS.LEAVE)
+  handleLeaveRoom(client: Socket, payload: RoomEventPayload) {
+    if (!validateRoomPayload(payload)) {
+      this.logger.warn('Invalid leave room payload', { payload });
+      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_REQUIRED });
       return;
     }
 
     const { room } = payload;
+    this.logger.logRoomEvent(room, 'leave', client.id);
     console.log('Leaving room:', room);
-    this.roomService.leaveRoom(client, room, server);
-    return {
-      message: 'Left room',
-      room
-    }
+    this.roomService.leaveRoom(client, room, this.server);
+    return createEventResponse(ROOM_MESSAGES.LEFT, { room });
   }
 
+  /**
+   * Handles broadcast messages in a room
+   * @param client Socket client instance
+   * @param payload Broadcast message payload
+   */
   @UseGuards(RoomValidationGuard)
-  @SubscribeMessage('broadcast-message')
-  handleBroadcastMessage(client: Socket, payload: any) {
-    if (!payload || !payload.room) {
-      client.emit('error', { message: 'Room id is required' });
-      return;
-    }
+  @SubscribeMessage(ROOM_EVENTS.BROADCAST)
+  handleBroadcastMessage(client: Socket, payload: BroadcastMessagePayload) {
+    // if (!validateRoomPayload(payload)) {
+    //   this.logger.warn('Invalid broadcast message payload', { payload });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_REQUIRED });
+    //   return;
+    // }
+
     const { room, message } = payload;
+    console.log('payload', payload);
+    this.logger.logRoomEvent(room, 'broadcast', client.id, { message });
     console.log('Broadcasting message in room:', room, 'Message:', message);
     this.signalRoutes.handleBroadcastMessage(client, this.server, payload);
-    return {
-      message: 'Message broadcasted successfully',
-      room,
-      timestamp: new Date().toISOString()
-    }
+    return createEventResponse(ROOM_MESSAGES.MESSAGE_SENT, { room });
   }
 
-@UseGuards(RoomValidationGuard)
-@SubscribeMessage('share-video')
-async handleVideoShare(client: Socket, payload: any) {
-  if (!payload || !payload.room) {
-    client.emit('error', { message: 'Room id is required' });
-    return;
-  }
-
-  const { room, videoEnabled, sdpOffer } = payload;
-
-  // Check if user is in the specified room
-  const roomsMap = this.server.sockets.adapter.rooms;
-  const roomClients = Array.from(roomsMap?.get(room) || []);
-  if (!roomClients.includes(client.id)) {
-    client.emit('error', { message: 'You must be in the room to share video' });
-    return;
-  }
-
-  if (videoEnabled && !sdpOffer) {
-    client.emit('error', { message: 'SDP offer is required to start video' });
-    return;
-  }
-
-  // Handle WebRTC signaling
-  if (videoEnabled) {
-    // Get all other users in the room
-    const otherUsers = Array.from(roomClients).filter(id => id !== client.id);
-
-    // Broadcast the offer to other peers in the room
-    client.to(room).emit('video-offer', {
-      userId: client.id,
-      sdpOffer,
-      timestamp: new Date().toISOString()
-    });
-
-    // Send list of existing users to the new participant
-    client.emit('existing-users', {
-      users: otherUsers,
-      timestamp: new Date().toISOString()
-    });
-  } else {
-    // Notify peers to close video connection
-    client.to(room).emit('video-close', {
-      userId: client.id,
-      timestamp: new Date().toISOString()
-    });
-  }
-
-  // Broadcast video state change to all users in the room
-  client.to(room).emit('user-video-state', {
-    userId: client.id,
-    videoEnabled,
-    timestamp: new Date().toISOString()
-  });
-
-  console.log(`User ${client.id} ${videoEnabled ? 'started' : 'stopped'} video sharing in room:`, room);
-
-  return {
-    message: `Video ${videoEnabled ? 'enabled' : 'disabled'} successfully`,
-    room,
-    userId: client.id,
-    videoEnabled,
-    timestamp: new Date().toISOString()
-  }
-}
-
-@UseGuards(RoomValidationGuard)
-@SubscribeMessage('video-answer')
-async handleVideoAnswer(client: Socket, payload: any) {
-  const { room, targetUserId, sdpAnswer } = payload;
-
-  if (!room || !targetUserId || !sdpAnswer) {
-    client.emit('error', { message: 'Invalid video answer payload' });
-    return;
-  }
-
-  // Check if user is in the specified room
-  const roomsMap = this.server.sockets.adapter.rooms;
-  const roomClients = Array.from(roomsMap?.get(room) || []);
-  if (!roomClients.includes(client.id)) {
-    client.emit('error', { message: 'You must be in the room to send video answer' });
-    return;
-  }
-
-  // Forward the answer to the specific peer
-  client.to(targetUserId).emit('video-answer-received', {
-    userId: client.id,
-    sdpAnswer,
-    timestamp: new Date().toISOString()
-  });
-
-  console.log(`User ${client.id} sent video answer to ${targetUserId} in room:`, room);
-
-  return {
-    message: 'Video answer sent successfully',
-    room,
-    targetUserId,
-    timestamp: new Date().toISOString()
-  };
-}
-
-@UseGuards(RoomValidationGuard)
-@SubscribeMessage('ice-candidate')
-async handleIceCandidate(client: Socket, payload: any) {
-  const { room, targetUserId, candidate } = payload;
-
-  if (!room || !targetUserId || !candidate) {
-    client.emit('error', { message: 'Invalid ICE candidate payload' });
-    return;
-  }
-
-  // Check if user is in the specified room
-  const roomsMap = this.server.sockets.adapter.rooms;
-  const roomClients = Array.from(roomsMap?.get(room) || []);
-  if (!roomClients.includes(client.id)) {
-    client.emit('error', { message: 'You must be in the room to send ICE candidates' });
-    return;
-  }
-
-  // Forward the ICE candidate to the specific peer
-  client.to(targetUserId).emit('ice-candidate-received', {
-    userId: client.id,
-    candidate,
-    timestamp: new Date().toISOString()
-  });
-
-  console.log(`User ${client.id} sent ICE candidate to ${targetUserId} in room:`, room);
-
-  return {
-    message: 'ICE candidate sent successfully',
-    room,
-    targetUserId,
-    timestamp: new Date().toISOString()
-  };
-}
-
+  /**
+   * Handles video sharing requests
+   * @param client Socket client instance
+   * @param payload Video share payload
+   */
   @UseGuards(RoomValidationGuard)
-  @SubscribeMessage('reconnect-video')
-  async handleVideoReconnect(client: Socket, payload: any) {
-    const { room } = payload;
-
-    if (!room) {
-      client.emit('error', { message: 'Room id is required' });
+  @SubscribeMessage(ROOM_EVENTS.VIDEO_SHARE)
+  async handleVideoShare(client: Socket, payload: VideoEventPayload) {
+    if (!validateRoomPayload(payload)) {
+      this.logger.warn('Invalid video share payload', { payload });
+      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_REQUIRED });
       return;
     }
 
-    // Check if user is in the specified room
-    const roomClients = Array.from(this.server.sockets.adapter.rooms.get(room) || []);
-    if (!roomClients.includes(client.id)) {
-      client.emit('error', { message: 'You must be in the room to reconnect video' });
-      return;
+    const { room, videoEnabled, sdpOffer } = payload;
+
+    // if (!isUserInRoom(this.server, client, room)) {
+    //   this.logger.warn('User not in room for video share', { room, userId: client.id });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.NOT_IN_ROOM });
+    //   return;
+    // }
+
+    // if (videoEnabled && !sdpOffer) {
+    //   this.logger.warn('Missing SDP offer for video share', { room, userId: client.id });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.SDP_OFFER_REQUIRED });
+    //   return;
+    // }
+
+    if (true) {
+      const otherUsers = getOtherUsersInRoom(this.server, room, client.id);
+      
+      client.to(room).emit('video-offer', createEventResponse('Video offer received', {
+        userId: client.id,
+        sdpOffer
+      }));
+
+      client.emit('existing-users', createEventResponse('Existing users', {
+        users: otherUsers
+      }));
+    } else {
+      client.to(room).emit('video-close', createEventResponse('Video closed', {
+        userId: client.id
+      }));
     }
 
-    // Get all other users in the room
-    const otherUsers = Array.from(roomClients).filter(id => id !== client.id);
+    client.to(room).emit(ROOM_EVENTS.VIDEO_STATE, 
+      createVideoStatePayload(client.id, videoEnabled, room)
+    );
 
-    // Notify other users about reconnection attempt
-    client.to(room).emit('peer-reconnecting', {
-      userId: client.id,
-      timestamp: new Date().toISOString()
-    });
+    this.logger.logRoomEvent(room, 'video-share', client.id, { videoEnabled });
 
-    return {
-      message: 'Video reconnection initiated',
-      room,
-      users: otherUsers,
-      timestamp: new Date().toISOString()
-    };
+    console.log(`User ${client.id} ${videoEnabled ? 'started' : 'stopped'} video sharing in room:`, room);
+
+    return createEventResponse(
+      videoEnabled ? ROOM_MESSAGES.VIDEO_ENABLED : ROOM_MESSAGES.VIDEO_DISABLED,
+      { room, userId: client.id, videoEnabled }
+    );
   }
 
+  /**
+   * Handles video answer responses
+   * @param client Socket client instance
+   * @param payload Video answer payload
+   */
   @UseGuards(RoomValidationGuard)
-  @SubscribeMessage('video-state')
-  async handleVideoState(client: Socket, payload: any) {
-    const { room, videoEnabled, audioEnabled } = payload;
+  @SubscribeMessage(ROOM_EVENTS.VIDEO_ANSWER)
+  async handleVideoAnswer(client: Socket, payload: VideoEventPayload) {
+    const { room, targetUserId, sdpAnswer } = payload;
 
-    if (!room) {
-      client.emit('error', { message: 'Room id is required' });
-      return;
-    }
+    // if (!room || !targetUserId || !sdpAnswer) {
+    //   this.logger.warn('Invalid video answer payload', { payload });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.INVALID_PAYLOAD });
+    //   return;
+    // }
 
-    // Check if user is in the specified room
-    const roomClients = Array.from(this.server.sockets.adapter.rooms.get(room) || []);
-    if (!roomClients.includes(client.id)) {
-      client.emit('error', { message: 'You must be in the room to update video state' });
-      return;
-    }
+    // if (!isUserInRoom(this.server, client, room)) {
+    //   this.logger.warn('User not in room for video answer', { room, userId: client.id });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.NOT_IN_ROOM });
+    //   return;
+    // }
 
-    // Broadcast video/audio state change to all users in the room
-    client.to(room).emit('peer-media-state-changed', {
+    client.to(targetUserId!).emit('video-answer-received', createEventResponse('Video answer received', {
       userId: client.id,
-      videoEnabled,
-      audioEnabled,
-      timestamp: new Date().toISOString()
-    });
+      sdpAnswer
+    }));
 
-    console.log(`User ${client.id} updated media state in room:`, room, { videoEnabled, audioEnabled });
+    this.logger.logRoomEvent(room, 'video-answer', client.id, { targetUserId });
 
-    return {
-      message: 'Media state updated successfully',
+    console.log(`User ${client.id} sent video answer to ${targetUserId} in room:`, room);
+
+    return createEventResponse(ROOM_MESSAGES.VIDEO_ANSWER_SENT, {
       room,
-      videoEnabled,
-      audioEnabled,
-      timestamp: new Date().toISOString()
-    };
+      targetUserId
+    });
+  }
+
+  /**
+   * Handles ICE candidate exchanges
+   * @param client Socket client instance
+   * @param payload ICE candidate payload
+   */
+  @UseGuards(RoomValidationGuard)
+  @SubscribeMessage(ROOM_EVENTS.ICE_CANDIDATE)
+  async handleIceCandidate(client: Socket, payload: VideoEventPayload) {
+    const { room, targetUserId, candidate } = payload;
+    console.log('payload', payload);
+
+    // if (!room || !targetUserId || !candidate) {
+    //   this.logger.warn('Invalid ICE candidate payload', { payload });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.INVALID_PAYLOAD });
+    //   return;
+    // }
+
+    // if (!isUserInRoom(this.server, client, room)) {
+    //   this.logger.warn('User not in room for ICE candidate', { room, userId: client.id });
+    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.NOT_IN_ROOM });
+    //   return;
+    // }
+
+    // client.to(targetUserId).emit('ice-candidate-received', createEventResponse('ICE candidate received', {
+    //   userId: client.id,
+    //   candidate
+    // }));
+
+    this.logger.logRoomEvent(room, 'ice-candidate', client.id, { targetUserId });
+
+    return createEventResponse(ROOM_MESSAGES.ICE_CANDIDATE_SENT, {
+      room,
+      targetUserId
+    });
   }
 }

@@ -1,5 +1,6 @@
 import { RoomErrors } from 'src/common/errors/room.errors';
 import { RoomRepository } from '../modules/room/room.repository';
+import { Room } from '../types/room.types';
 
 export const isValidRoomId = (roomId: string): boolean => {
     // Early return for invalid input
@@ -21,26 +22,12 @@ export const isValidRoomId = (roomId: string): boolean => {
     return ROOM_ID_PATTERN.test(roomId);
 };
 
-interface Room {
-    id: string;
-    name: string;
-    createdAt: Date;
-    participants: string[]; // Array of user IDs
-    isActive: boolean;
-}
-
-interface User {
-    id: string;
-    name: string;
-    email: string;
-}
-
 /**
  * Checks if a room exists in the database
  */
 export const doesRoomExist = async (roomId: string, roomRepository: RoomRepository): Promise<boolean> => {
     try {
-        const room = await roomRepository.findById(roomId);
+        const room = await roomRepository.getRoom(roomId);
         return !!room;
     } catch (error) {
         console.error('Error checking room existence:', error);
@@ -49,28 +36,41 @@ export const doesRoomExist = async (roomId: string, roomRepository: RoomReposito
 };
 
 /**
- * Validates if a user has access to a specific room
+ * Checks if a room is active
  */
-export const hasUserAccessToRoom = async (userId: string, roomId: string, roomRepository: RoomRepository): Promise<boolean> => {
+export const isRoomActive = async (roomId: string, roomRepository: RoomRepository): Promise<boolean> => {
     try {
-        const room = await roomRepository.findByIdWithParticipant(roomId, userId);
-        return !!room;
+        const room = await roomRepository.getRoom(roomId);
+        return room?.isActive || false;
     } catch (error) {
-        console.error('Error checking user access:', error);
+        console.error('Error checking room status:', error);
         return false;
     }
 };
 
 /**
- * Checks if a room has reached its maximum capacity
+ * Checks if a user has access to a room
  */
-export const isRoomFull = async (roomId: string, roomRepository: RoomRepository, maxParticipants: number = 10): Promise<boolean> => {
+export const hasUserAccessToRoom = async (userId: string, roomId: string, roomRepository: RoomRepository): Promise<boolean> => {
     try {
-        const participantsCount = await roomRepository.getRoomParticipantsCount(roomId);
-        return participantsCount >= maxParticipants;
+        return await roomRepository.isUserInRoom(roomId, userId);
+    } catch (error) {
+        console.error('Error checking room access:', error);
+        return false;
+    }
+};
+
+/**
+ * Checks if a room is at maximum capacity
+ */
+export const isRoomFull = async (roomId: string, roomRepository: RoomRepository): Promise<boolean> => {
+    try {
+        const room = await roomRepository.getRoom(roomId);
+        if (!room) return true;
+        return room.participants.length >= room.maxParticipants;
     } catch (error) {
         console.error('Error checking room capacity:', error);
-        return false;
+        return true;
     }
 };
 
@@ -90,18 +90,6 @@ export const createRoom = async (roomData: Partial<Room>): Promise<Room | null> 
 };
 
 /**
- * Validates if a room is still active and not expired
- */
-export const isRoomActive = async (roomId: string, roomRepository: RoomRepository): Promise<boolean> => {
-    try {
-        return await roomRepository.isRoomActive(roomId);
-    } catch (error) {
-        console.error('Error checking room status:', error);
-        return false;
-    }
-};
-
-/**
  * Comprehensive room validation that combines multiple checks
  */
 export const validateRoomAccess = async (
@@ -110,33 +98,33 @@ export const validateRoomAccess = async (
     roomRepository: RoomRepository
 ): Promise<{ isValid: boolean; error?: string }> => {
     // First check if the room ID format is valid
-    if (!isValidRoomId(roomId)) {
-        return { isValid: false, error: RoomErrors.INVALID_ROOM_ID_FORMAT  };
-    }
+    // if (!isValidRoomId(roomId)) {
+    //     return { isValid: false, error: RoomErrors.INVALID_ROOM_ID_FORMAT };
+    // }
 
-    // Check if room exists
-    const roomExists = await doesRoomExist(roomId, roomRepository);
-    if (!roomExists) {
-        return { isValid: false, error: RoomErrors.ROOM_DOES_NOT_EXIST  };
-    }
+    // // Check if room exists
+    // const roomExists = await doesRoomExist(roomId, roomRepository);
+    // if (!roomExists) {
+    //     return { isValid: false, error: RoomErrors.ROOM_DOES_NOT_EXIST };
+    // }
 
-    // Check if room is active
-    const isActive = await isRoomActive(roomId, roomRepository);
-    if (!isActive) {
-        return { isValid: false, error: RoomErrors.ROOM_NOT_ACTIVE };
-    }
+    // // Check if room is active
+    // const isActive = await isRoomActive(roomId, roomRepository);
+    // if (!isActive) {
+    //     return { isValid: false, error: RoomErrors.ROOM_NOT_ACTIVE };
+    // }
 
-    // Check if user has access
-    const hasAccess = await hasUserAccessToRoom(userId, roomId, roomRepository);
-    if (!hasAccess) {
-        return { isValid: false, error: RoomErrors.USER_NO_ACCESS };
-    }
+    // // Check if user has access
+    // const hasAccess = await hasUserAccessToRoom(userId, roomId, roomRepository);
+    // if (!hasAccess) {
+    //     return { isValid: false, error: RoomErrors.USER_NO_ACCESS };
+    // }
 
-    // Check if room is full
-    const isFull = await isRoomFull(roomId, roomRepository)
-    if (isFull) {
-        return { isValid: false, error: 'Room is at maximum capacity' };
-    }
+    // // Check if room is full
+    // const isFull = await isRoomFull(roomId, roomRepository);
+    // if (isFull) {
+    //     return { isValid: false, error: RoomErrors.ROOM_FULL };
+    // }
 
     return { isValid: true };
 };

@@ -27,12 +27,12 @@ export class SignalRoutes {
   @SubscribeMessage('broadcast-message')
   handleBroadcastMessage(client: Socket, server: Server, data: { room: string; message: any }) {
     const { room, message } = data;
-    if (this.roomService.isParticipantInRoom(room, client.id)) {
+    // if (this.roomService.isParticipantInRoom(room, client.id)) {
       server.to(room).emit('message', {
         from: client.id,
         message,
         timestamp: new Date().toISOString()
       });
-    }
+    // }
   }
 }

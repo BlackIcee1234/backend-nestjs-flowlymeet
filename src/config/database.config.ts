@@ -10,7 +10,7 @@ export class DatabaseConfig {
 
   constructor(private configService: ConfigService) {
     // Initialize Prisma client with direct URL for migrations
-    const databaseUrl = process.env.DATABASE_URL;
+    const databaseUrl = this.configService.get<string>('DATABASE_URL');
     if (!databaseUrl) {
       throw new Error('DATABASE_URL environment variable is not set');
     }
@@ -25,7 +25,7 @@ export class DatabaseConfig {
 
     // Initialize PostgreSQL pool with connection string
     this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: databaseUrl,
     });
   }
 

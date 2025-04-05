@@ -1,63 +1,115 @@
 import { Injectable } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import { RoomParticipant } from '../../../types/room.types';
+import { RoomParticipant, Room } from '../../../types/room.types';
 import { RoomRepository } from '../room.repository';
 import { validateRoomAccess } from '../../../utils/room.utils';
+import { createEventResponse } from '../utils/room.utils';
+import { ROOM_EVENTS, ROOM_MESSAGES } from '../constants/room.constants';
 
 @Injectable()
 export class RoomService {
   private rooms: Map<string, Map<string, RoomParticipant>> = new Map();
+
   constructor(private readonly roomRepository: RoomRepository) {}
 
-  handleUserLeaveRooms(client: Socket, server: Server) {
-    this.rooms.forEach((participants, room) => {
-      if (participants.has(client.id)) {
-        participants.delete(client.id);
-        client.leave(room);
-        if (participants.size === 0) {
-          this.rooms.delete(room);
-        } else {
-          server.to(room).emit('user-disconnected', { userId: client.id });
-        }
-      }
-    });
+  /**
+   * Gets room information
+   * @param roomId Room identifier
+   * @returns Room information or null if not found
+   */
+  async getRoomInfo(roomId: string): Promise<Room | null> {
+    return this.roomRepository.getRoom(roomId);
   }
 
-  joinRoom(client: Socket, room: string, server: Server) {
-    client.join(room);
-    
-    if (!this.rooms.has(room)) {
-      this.rooms.set(room, new Map());
+  /**
+   * Creates a new room
+   * @param roomId Room identifier
+   * @param creatorId Creator's user ID
+   * @param name Room name
+   * @param maxParticipants Maximum number of participants
+   * @returns Created room information
+   */
+  async createRoom(
+    roomId: string,
+    creatorId: string,
+    name: string,
+    maxParticipants: number = 10
+  ): Promise<Room> {
+    const room = await this.roomRepository.create({
+      id: roomId,
+      name,
+      ownerId: creatorId,
+      maxParticipants
+    });
+
+    if (!room) {
+      throw new Error('Failed to create room');
     }
-    
-    const participant: RoomParticipant = {
-      id: client.id,
-      hasVideo: false,
-      hasAudio: false,
-      isScreenSharing: false
-    };
-    
-    this.rooms.get(room)?.set(client.id, participant);
 
-    const participants = Array.from(this.rooms.get(room)?.values() || []);
-    server.to(room).emit('user-joined', { 
-      userId: client.id,
-      participants
-    });
+    return room;
   }
 
-  leaveRoom(client: Socket, room: string, server: Server) {
-    if (this.rooms.has(room)) {
-      const participants = this.rooms.get(room);
-      if (participants) {
-        participants.delete(client.id);
-      }
-      client.leave(room);
-      
-      if (participants?.size === 0) {
-        this.rooms.delete(room);
-      } else {
-        server.to(room).emit('user-left', { userId: client.id });
+  /**
+   * Joins a room
+   * @param client Socket client instance
+   * @param roomId Room identifier
+   * @param server Socket.io server instance
+   */
+  async joinRoom(client: Socket, roomId: string, server: Server): Promise<void> {
+    // const validation = await validateRoomAccess(roomId, client.id, this.roomRepository);
+    // if (!validation.isValid) {
+    //   client.emit(ROOM_EVENTS.ERROR, { message: validation.error });
+    //   return;
+    // }
+
+    // const room = await this.roomRepository.addParticipant(roomId, client.id);
+    // if (!room) {
+    //   client.emit(ROOM_EVENTS.ERROR, { message: 'Failed to join room' });
+    //   return;
+    // }
+
+    await client.join(roomId);
+    client.to(roomId).emit(ROOM_EVENTS.USER_JOINED, createEventResponse('User joined', {
+      userId: client.id,
+      roomId
+    }));
+  }
+
+  /**
+   * Leaves a room
+   * @param client Socket client instance
+   * @param roomId Room identifier
+   * @param server Socket.io server instance
+   */
+  async leaveRoom(client: Socket, roomId: string, server: Server): Promise<void> {
+    const room = await this.roomRepository.removeParticipant(roomId, client.id);
+    if (!room) {
+      client.emit(ROOM_EVENTS.ERROR, { message: 'Failed to leave room' });
+      return;
+    }
+
+    await client.leave(roomId);
+    client.to(roomId).emit(ROOM_EVENTS.USER_LEFT, createEventResponse('User left', {
+      userId: client.id,
+      roomId
+    }));
+
+    // If room is empty, delete it
+    if (room.participants.length === 0) {
+      await this.roomRepository.deleteRoom(roomId);
+    }
+  }
+
+  /**
+   * Handles user leaving all rooms
+   * @param client Socket client instance
+   * @param server Socket.io server instance
+   */
+  async handleUserLeaveRooms(client: Socket, server: Server): Promise<void> {
+    const rooms = Array.from(client.rooms);
+    for (const roomId of rooms) {
+      if (roomId !== client.id) { // Skip the default room (socket ID)
+        await this.leaveRoom(client, roomId, server);
       }
     }
   }
@@ -93,14 +145,6 @@ export class RoomService {
 
   isParticipantInRoom(room: string, userId: string): boolean {
     return this.rooms.has(room) && this.rooms.get(room)?.has(userId) || false;
-  }
-  async createRoom(data: {
-    id: string;
-    name: string;
-    ownerId: string;
-    maxParticipants?: number;
-  }) {
-    return this.roomRepository.create(data);
   }
 
   async validateRoomAccess(roomId: string, userId: string) {

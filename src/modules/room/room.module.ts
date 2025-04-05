@@ -1,21 +1,22 @@
 import { Module } from '@nestjs/common';
 import { RoomGateway } from './room.gateway';
 import { RoomService } from './services/room.service';
-import { RoomRoutes } from './routes/room.routes';
-import { MediaRoutes } from './routes/media.routes';
-import { SignalRoutes } from './routes/signal.routes';
 import { RoomRepository } from './room.repository';
-import { DatabaseConfig } from '../../config/database.config';
+import { SignalRoutes } from './routes/signal.routes';
+import { LoggerModule } from '../../common/logger/logger.module';
+import { DatabaseModule } from '../../config/database.module';
 
 @Module({
+  imports: [
+    LoggerModule,
+    DatabaseModule
+  ],
   providers: [
     RoomGateway,
     RoomService,
-    RoomRoutes,
-    MediaRoutes,
-    SignalRoutes,
     RoomRepository,
-    DatabaseConfig
-  ]
+    SignalRoutes
+  ],
+  exports: [RoomService]
 })
 export class RoomModule {}
