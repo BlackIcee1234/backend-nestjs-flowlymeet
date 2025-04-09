@@ -15,6 +15,14 @@ async function bootstrap() {
   });
   
   setupSwagger(app);
-  await app.listen(process.env.PORT ?? 2000);
+  
+  // Enable CORS
+  app.enableCors();
+  
+  // Get port from environment variable or use default
+  const port = process.env.PORT || 3000;
+  
+  // Listen on all network interfaces
+  await app.listen(port, '0.0.0.0');
 }
 bootstrap();
