@@ -5,12 +5,16 @@ import { RoomRepository } from './room.repository';
 import { SignalRoutes } from './routes/signal.routes';
 import { LoggerModule } from '../../common/logger/logger.module';
 import { DatabaseModule } from '../../config/database.module';
+import { RoomController } from './room.controller';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     LoggerModule,
-    DatabaseModule
+    DatabaseModule,
+    AuthModule
   ],
+  controllers: [RoomController],
   providers: [
     RoomGateway,
     RoomService,

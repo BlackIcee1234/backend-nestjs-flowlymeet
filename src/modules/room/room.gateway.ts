@@ -27,7 +27,6 @@ import {
   validateRoomPayload,
   createVideoStatePayload
 } from './utils/room.utils';
-import { createRoomId } from '../../utils/room.utils';
 
 /**
  * Gateway for handling real-time room communication and WebRTC signaling
@@ -84,44 +83,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /**
- * Handles room creation requests
- * @param client Socket client instance
- * @param payload Room creation payload
- */
-  @UseGuards(RoomValidationGuard)
-  @SubscribeMessage(ROOM_EVENTS.CREATE)
-  async handleCreateRoom(client: Socket, payload: { name: string; maxParticipants?: number, userId: string }) {
-    // Check if user is authenticated
-    const userId = payload.userId;
-    if (!userId) {
-      this.logger.warn('Unauthorized room creation attempt', { clientId: client.id });
-      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.UNAUTHORIZED });
-      return;
-    }
-
-    try {
-      const roomCode = createRoomId();
-      const room = await this.roomService.createRoom(
-        roomCode,
-        userId,
-        payload.name,
-        payload.maxParticipants
-      );
-
-      this.logger.logRoomEvent(roomCode, 'create', client.id);
-      console.log('Room created:', roomCode);
-      this.logger.logRoomEvent(roomCode, 'join', client.id);
-      console.log('Joining room:', roomCode);
-      this.roomService.joinRoom(client, roomCode, this.server);
-      return createEventResponse(ROOM_MESSAGES.JOINED, { room: roomCode });
-    } catch (error) {
-      this.logger.error('Failed to create room: ' + error.message);
-      client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_CREATION_FAILED });
-      return;
-    }
-  }
-
-  /**
    * Handles room join requests
    * @param client Socket client instance
    * @param payload Room join payload
@@ -171,12 +132,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @UseGuards(RoomValidationGuard)
   @SubscribeMessage(ROOM_EVENTS.BROADCAST)
   handleBroadcastMessage(client: Socket, payload: BroadcastMessagePayload) {
-    // if (!validateRoomPayload(payload)) {
-    //   this.logger.warn('Invalid broadcast message payload', { payload });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.ROOM_REQUIRED });
-    //   return;
-    // }
-
     const { room, message } = payload;
     console.log('payload', payload);
     this.logger.logRoomEvent(room, 'broadcast', client.id, { message });
@@ -200,18 +155,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     const { room, videoEnabled, sdpOffer } = payload;
-
-    // if (!isUserInRoom(this.server, client, room)) {
-    //   this.logger.warn('User not in room for video share', { room, userId: client.id });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.NOT_IN_ROOM });
-    //   return;
-    // }
-
-    // if (videoEnabled && !sdpOffer) {
-    //   this.logger.warn('Missing SDP offer for video share', { room, userId: client.id });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.SDP_OFFER_REQUIRED });
-    //   return;
-    // }
 
     if (true) {
       const otherUsers = getOtherUsersInRoom(this.server, room, client.id);
@@ -254,18 +197,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleVideoAnswer(client: Socket, payload: VideoEventPayload) {
     const { room, targetUserId, sdpAnswer } = payload;
 
-    // if (!room || !targetUserId || !sdpAnswer) {
-    //   this.logger.warn('Invalid video answer payload', { payload });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.INVALID_PAYLOAD });
-    //   return;
-    // }
-
-    // if (!isUserInRoom(this.server, client, room)) {
-    //   this.logger.warn('User not in room for video answer', { room, userId: client.id });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.NOT_IN_ROOM });
-    //   return;
-    // }
-
     client.to(targetUserId!).emit('video-answer-received', createEventResponse('Video answer received', {
       userId: client.id,
       sdpAnswer
@@ -291,23 +222,6 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleIceCandidate(client: Socket, payload: VideoEventPayload) {
     const { room, targetUserId, candidate } = payload;
     console.log('payload', payload);
-
-    // if (!room || !targetUserId || !candidate) {
-    //   this.logger.warn('Invalid ICE candidate payload', { payload });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.INVALID_PAYLOAD });
-    //   return;
-    // }
-
-    // if (!isUserInRoom(this.server, client, room)) {
-    //   this.logger.warn('User not in room for ICE candidate', { room, userId: client.id });
-    //   client.emit(ROOM_EVENTS.ERROR, { message: ROOM_ERRORS.NOT_IN_ROOM });
-    //   return;
-    // }
-
-    // client.to(targetUserId).emit('ice-candidate-received', createEventResponse('ICE candidate received', {
-    //   userId: client.id,
-    //   candidate
-    // }));
 
     this.logger.logRoomEvent(room, 'ice-candidate', client.id, { targetUserId });
 
