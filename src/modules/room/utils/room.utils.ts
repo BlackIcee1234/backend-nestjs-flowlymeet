@@ -1,11 +1,25 @@
 import { Server, Socket } from 'socket.io';
 
+export const getClientInfo = (client: Socket) => {
+  return {
+    id: client.id,
+    handshake: {
+      address: client.handshake.address,
+      time: client.handshake.time,
+      query: client.handshake.query,
+      headers: {
+        origin: client.handshake.headers.origin,
+        userAgent: client.handshake.headers['user-agent']
+      }
+    }
+  };
+};
+
 /**
  * Interface for room event payloads
  */
 export interface RoomEventPayload {
-  room: string;
-  [key: string]: any;
+  roomCode: string;
 }
 
 /**
@@ -13,6 +27,8 @@ export interface RoomEventPayload {
  */
 export interface BroadcastMessagePayload extends RoomEventPayload {
   message: string;
+  senderId: string;
+  timestamp: string;
 }
 
 /**
@@ -70,7 +86,13 @@ export const createEventResponse = (message: string, data: any = {}) => ({
  * @returns boolean indicating if payload is valid
  */
 export const validateRoomPayload = (payload: RoomEventPayload): boolean => {
-  return !!payload && !!payload.room;
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'roomCode' in payload &&
+    typeof payload.roomCode === 'string' &&
+    payload.roomCode.trim() !== ''
+  );
 };
 
 /**

@@ -153,8 +153,8 @@ export class RoomService {
     }
   }
 
-  isParticipantInRoom(room: string, userId: string): boolean {
-    return this.rooms.has(room) && this.rooms.get(room)?.has(userId) || false;
+  isParticipantInRoom(roomCode: string, userId: string): boolean {
+    return this.rooms.has(roomCode) && this.rooms.get(roomCode)?.has(userId) || false;
   }
 
   async validateRoomAccess(roomId: string, userId: string) {

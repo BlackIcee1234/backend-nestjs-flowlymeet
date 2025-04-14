@@ -27,7 +27,8 @@ import {
   validateRoomPayload,
   createVideoStatePayload
 } from './utils/room.utils';
-
+import { getClientInfo } from './utils/room.utils';
+import { RoomWsService } from './services/room.ws.service';
 /**
  * Gateway for handling real-time room communication and WebRTC signaling
  */
@@ -38,7 +39,8 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private readonly roomService: RoomService,
     private readonly signalRoutes: SignalRoutes,
-    private readonly logger: LoggerService
+    private readonly logger: LoggerService,
+    private readonly roomWsService: RoomWsService
   ) {
     this.logger.setContext('RoomGateway');
   }
@@ -47,24 +49,8 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * Handles new WebSocket connections
    * @param client Socket client instance
    */
-  async handleConnection(client: Socket) {
-    this.logger.logWebSocketEvent(client, 'connection');
-    
-    const clientInfo = {
-      id: client.id,
-      handshake: {
-        address: client.handshake.address,
-        time: client.handshake.time,
-        query: client.handshake.query,
-        headers: {
-          origin: client.handshake.headers.origin,
-          userAgent: client.handshake.headers['user-agent']
-        }
-      }
-    };
-    
-    console.log('New client connected:', clientInfo);
-    
+  async handleConnection(client: Socket) {   
+    this.roomWsService.handleConnection(client);
     return client.emit(ROOM_EVENTS.CONNECTION_STATUS, createEventResponse('Connected', { 
       connected: true,
       clientId: client.id
@@ -96,11 +82,11 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const { room } = payload;
-    this.logger.logRoomEvent(room, 'join', client.id);
-    console.log('Joining room:', room);
-    this.roomService.joinRoom(client, room, this.server);
-    return createEventResponse(ROOM_MESSAGES.JOINED, { room });
+    const { roomCode } = payload;
+    this.logger.logRoomEvent(roomCode, 'join', client.id);
+    console.log('Joining room:', roomCode);
+    this.roomService.joinRoom(client, roomCode, this.server);
+    return createEventResponse(ROOM_MESSAGES.JOINED, { roomCode });
   }
 
   /**
@@ -117,11 +103,11 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const { room } = payload;
-    this.logger.logRoomEvent(room, 'leave', client.id);
-    console.log('Leaving room:', room);
-    this.roomService.leaveRoom(client, room, this.server);
-    return createEventResponse(ROOM_MESSAGES.LEFT, { room });
+    const { roomCode } = payload;
+    this.logger.logRoomEvent(roomCode, 'leave', client.id);
+    console.log('Leaving room:', roomCode);
+    this.roomService.leaveRoom(client, roomCode, this.server);
+    return createEventResponse(ROOM_MESSAGES.LEFT, { roomCode });
   }
 
   /**
@@ -132,12 +118,11 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @UseGuards(RoomValidationGuard)
   @SubscribeMessage(ROOM_EVENTS.BROADCAST)
   handleBroadcastMessage(client: Socket, payload: BroadcastMessagePayload) {
-    const { room, message } = payload;
-    console.log('payload', payload);
-    this.logger.logRoomEvent(room, 'broadcast', client.id, { message });
-    console.log('Broadcasting message in room:', room, 'Message:', message);
+    const { roomCode, message } = payload;
+
+    this.logger.logRoomEvent(roomCode, 'Broadcast message', client.id, { payload });
     this.signalRoutes.handleBroadcastMessage(client, this.server, payload);
-    return createEventResponse(ROOM_MESSAGES.MESSAGE_SENT, { room });
+    return createEventResponse(ROOM_MESSAGES.MESSAGE_SENT, { roomCode });  
   }
 
   /**
@@ -154,12 +139,12 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const { room, videoEnabled, sdpOffer } = payload;
+    const { roomCode, videoEnabled, sdpOffer } = payload;
 
     if (true) {
-      const otherUsers = getOtherUsersInRoom(this.server, room, client.id);
+      const otherUsers = getOtherUsersInRoom(this.server, roomCode, client.id);
       
-      client.to(room).emit('video-offer', createEventResponse('Video offer received', {
+      client.to(roomCode).emit('video-offer', createEventResponse('Video offer received', {
         userId: client.id,
         sdpOffer
       }));
@@ -168,22 +153,22 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         users: otherUsers
       }));
     } else {
-      client.to(room).emit('video-close', createEventResponse('Video closed', {
+      client.to(roomCode).emit('video-close', createEventResponse('Video closed', {
         userId: client.id
       }));
     }
 
-    client.to(room).emit(ROOM_EVENTS.VIDEO_STATE, 
-      createVideoStatePayload(client.id, videoEnabled, room)
+    client.to(roomCode).emit(ROOM_EVENTS.VIDEO_STATE, 
+      createVideoStatePayload(client.id, videoEnabled, roomCode)
     );
 
-    this.logger.logRoomEvent(room, 'video-share', client.id, { videoEnabled });
+    this.logger.logRoomEvent(roomCode, 'video-share', client.id, { videoEnabled });
 
-    console.log(`User ${client.id} ${videoEnabled ? 'started' : 'stopped'} video sharing in room:`, room);
+    console.log(`User ${client.id} ${videoEnabled ? 'started' : 'stopped'} video sharing in room:`, roomCode);
 
     return createEventResponse(
       videoEnabled ? ROOM_MESSAGES.VIDEO_ENABLED : ROOM_MESSAGES.VIDEO_DISABLED,
-      { room, userId: client.id, videoEnabled }
+      { roomCode, userId: client.id, videoEnabled }
     );
   }
 
@@ -195,19 +180,19 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @UseGuards(RoomValidationGuard)
   @SubscribeMessage(ROOM_EVENTS.VIDEO_ANSWER)
   async handleVideoAnswer(client: Socket, payload: VideoEventPayload) {
-    const { room, targetUserId, sdpAnswer } = payload;
+    const { roomCode, targetUserId, sdpAnswer } = payload;
 
     client.to(targetUserId!).emit('video-answer-received', createEventResponse('Video answer received', {
       userId: client.id,
       sdpAnswer
     }));
 
-    this.logger.logRoomEvent(room, 'video-answer', client.id, { targetUserId });
+    this.logger.logRoomEvent(roomCode, 'video-answer', client.id, { targetUserId });
 
-    console.log(`User ${client.id} sent video answer to ${targetUserId} in room:`, room);
+    console.log(`User ${client.id} sent video answer to ${targetUserId} in room:`, roomCode);
 
     return createEventResponse(ROOM_MESSAGES.VIDEO_ANSWER_SENT, {
-      room,
+      roomCode,
       targetUserId
     });
   }
@@ -220,13 +205,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @UseGuards(RoomValidationGuard)
   @SubscribeMessage(ROOM_EVENTS.ICE_CANDIDATE)
   async handleIceCandidate(client: Socket, payload: VideoEventPayload) {
-    const { room, targetUserId, candidate } = payload;
+    const { roomCode, targetUserId, candidate } = payload;
     console.log('payload', payload);
 
-    this.logger.logRoomEvent(room, 'ice-candidate', client.id, { targetUserId });
+    this.logger.logRoomEvent(roomCode, 'ice-candidate', client.id, { targetUserId });
 
     return createEventResponse(ROOM_MESSAGES.ICE_CANDIDATE_SENT, {
-      room,
+      roomCode,
       targetUserId
     });
   }

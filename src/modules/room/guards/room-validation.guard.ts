@@ -16,18 +16,17 @@ export class RoomValidationGuard implements CanActivate {
       const data = context.switchToWs().getData();
       if(!data)
         throw new WsException('Invalid data');
-      // if (!data.room)
-      //   throw new WsException('Invalid room');
-      // const { isValid, error } = await validateRoomAccess(
-      //   room,
-      //   client.id,
-      //   this.roomRepository,
-      // );
-      // if (!isValid && error) {
-      //   throw new WsException(error);
-      // }
-      // return Boolean(isValid);
-      return data;
+      if (!data.room)
+        throw new WsException('Invalid room');
+      const { isValid, error } = await validateRoomAccess(
+        data.roomCode,
+        client.id,
+        this.roomRepository,
+      );
+      if (!isValid && error) {
+        throw new WsException(error);
+      }
+      return Boolean(isValid);
     } catch (ex) {
       throw new WsException(ex.message);
     }

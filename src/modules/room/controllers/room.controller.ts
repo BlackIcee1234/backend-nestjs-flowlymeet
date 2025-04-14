@@ -1,10 +1,10 @@
 import { Controller, Post, Body, UseGuards, Request, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import { RoomService } from './services/room.service';
-import { RoomValidationGuard } from './guards/room-validation.guard';
-import { LoggerService } from '../../common/logger/logger.service';
-import { createRoomId } from '../../utils/room.utils';
-import { ROOM_ERRORS } from './constants/room.constants';
-import { SupabaseAuthGuard } from '../../common/guards/supabase-auth.guard';
+import { RoomService } from '../services/room.service';
+import { RoomValidationGuard } from '../guards/room-validation.guard';
+import { LoggerService } from '../../../common/logger/logger.service';
+import { createRoomId } from '../../../utils/room.utils';
+import { ROOM_ERRORS } from '../constants/room.constants';
+import { SupabaseAuthGuard } from '../../../common/guards/supabase-auth.guard';
 
 interface CreateRoomDto {
   name: string;
@@ -26,7 +26,7 @@ export class RoomController {
   async createRoom(@Request() req, @Body() payload: CreateRoomDto) {
     this.logger.log('Received request to create room', { user: req.user, payload });
 
-    const userId = req.user.id; // This comes from the SupabaseAuthGuard
+    const userId = req.user.id;
     this.logger.log(`User ID extracted: ${userId}`);
 
     try {
